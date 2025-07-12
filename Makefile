@@ -1,13 +1,19 @@
 CC = gcc
 CFLAGS = -Wall -Wextra -std=c11
+OBJDIR = bin
+TARGET = $(OBJDIR)/jit
+OBJS = $(OBJDIR)/main.o
 
-all: jit
+all: $(TARGET)
 
-jit: main.o
-	$(CC) $(CFLAGS) -o jit main.o
+$(OBJDIR):
+	mkdir -p $(OBJDIR)
 
-main.o: main.c
-	$(CC) $(CFLAGS) -c main.c
+$(OBJDIR)/main.o: main.c | $(OBJDIR)
+	$(CC) $(CFLAGS) -c main.c -o $(OBJDIR)/main.o
+
+$(TARGET): $(OBJS)
+	$(CC) $(CFLAGS) -o $(TARGET) $(OBJS)
 
 clean:
-	rm -f *.o jit
+	rm -rf $(OBJDIR)

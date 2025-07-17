@@ -1,8 +1,10 @@
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <errno.h>
+#include <openssl/sha.h>
 
 #define DIR_MODE 0755
 
@@ -42,6 +44,72 @@ int handle_init_command() {
 }
 
 
+int handle_hash_object_command(const char *file_name) {
+    FILE *pF = fopen(file_name, "r");
+    if (pF == NULL) {
+        fprintf(stderr, "error: failed opening %s %s\n", file_name, strerror(errno));
+        return 1;
+    }
+
+    // Determine file size
+    if (fseek(pF, 0, SEEK_END) != 0) {
+        fprintf(stderr, "error: %s\n", strerror(errno));
+        fclose(pF);
+        return 1;
+    }
+    long file_size = ftell(pF);
+    if (file_size == -1L) {
+        fprintf(stderr, "error: %s\n", strerror(errno));
+        fclose(pF);
+        return 1;
+    }
+
+    // Read file
+    rewind(pF);
+    char *content_buffer = malloc(file_size);
+    if (content_buffer == NULL) {
+        fprintf(stderr, "error: memory allocation failed");
+        fclose(pF);
+        return 1;
+    }
+    size_t bytes_read = fread(content_buffer, 1, file_size, pF);
+    if (bytes_read != file_size) {
+        fprintf(stderr, "error: failed reading file");
+        fclose(pF);
+        return 1;
+    }
+
+    // Create header
+    char header_buffer[64];
+    int header_len = snprintf(header_buffer, sizeof(header_buffer), "blob %ld", file_size);
+
+    size_t total_size = header_len + file_size;
+    char *data_buffer = malloc(total_size);
+    if(data_buffer == NULL) {
+        fprintf(stderr, "error: memory allocation failed\n");
+        free(content_buffer);
+        fclose(pF);
+        return 1;
+    }
+
+    memcpy(data_buffer, header_buffer, header_len);
+    memcpy(data_buffer + header_len, content_buffer, file_size);
+    free(content_buffer);
+
+    // Hash using SHA-1
+    unsigned char hash[SHA_DIGEST_LENGTH];
+    SHA1((unsigned char *)data_buffer, total_size, hash);
+
+    for(int i = 0; i < SHA_DIGEST_LENGTH; i++) {
+        printf("%02x", hash[i]);
+    }
+    printf("\n");
+
+    fclose(pF);
+    return 0;
+}
+
+
 int main(int argc, char *argv[]) {
     printf("Welcome to my version control program\n");
     if (argc > 1 && strcmp(argv[1], "init") == 0) {
@@ -50,6 +118,13 @@ int main(int argc, char *argv[]) {
             printf("initialized empty Jit repository in .jit\n");
         } else {
             fprintf(stderr, "error: failed to initialize empty Jit repository\n");
+        }
+    } else if (argc > 2 && strcmp(argv[1], "hash-object") == 0) {
+        printf("you typed %s\n", argv[2]);
+        if (handle_hash_object_command(argv[2]) == 0) {
+            printf("Success hash-object\n");
+        } else {
+            fprintf(stderr, "Failed hash-object\n");
         }
     }
     return 0;

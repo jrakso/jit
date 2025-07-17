@@ -13,7 +13,7 @@ $(OBJDIR)/main.o: main.c | $(OBJDIR)
 	$(CC) $(CFLAGS) -c main.c -o $(OBJDIR)/main.o
 
 $(TARGET): $(OBJS)
-	$(CC) $(CFLAGS) -o $(TARGET) $(OBJS)
+	$(CC) $(CFLAGS) -o $(TARGET) $(OBJS) -lcrypto
 
 clean:
 	rm -rf $(OBJDIR)

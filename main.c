@@ -8,6 +8,36 @@
 
 #define DIR_MODE 0755
 
+int folder_exists(const char *path);
+int create_folder(const char *folder_name, mode_t mode);
+int handle_init_command();
+int handle_hash_object_command(const char *file_name);
+int handle_cat_file_command(const char *hash, char mode);
+
+
+int main(int argc, char *argv[]) {
+    printf("Welcome to my version control program\n");
+    if (argc > 1 && strcmp(argv[1], "init") == 0) {
+        printf("you typed %s\n", argv[1]);
+        if (handle_init_command() == 0) {
+            printf("initialized empty Jit repository in .jit\n");
+        } else {
+            fprintf(stderr, "error: failed to initialize empty Jit repository\n");
+        }
+    } else if (argc > 2 && strcmp(argv[1], "hash-object") == 0) {
+        printf("you typed %s\n", argv[2]);
+        if (handle_hash_object_command(argv[2]) == 0) {
+            printf("Success hash-object\n");
+        } else {
+            fprintf(stderr, "Failed hash-object\n");
+        }
+    } else if (argc > 3 && strcmp(argv[1], "cat-file") == 0) {
+        if (strcmp(argv[2], "-p") == 0) {
+            handle_cat_file_command(argv[3], 'p');
+        }
+    }
+    return 0;
+}
 
 int folder_exists(const char *path) {
     struct stat st;
@@ -117,7 +147,7 @@ int handle_hash_object_command(const char *file_name) {
     snprintf(file_path, sizeof(file_path), ".jit/objects/%.2s/%.38s", hash_hex, hash_hex + 2);
 
     // Write to file
-    FILE *output_file = fopen(file_path, "w");
+    FILE *output_file = fopen(file_path, "wb");
     if (output_file == NULL) {
         fprintf(stderr, "error: failed creating new file %s\n", strerror(errno));
         return 1;
@@ -129,22 +159,44 @@ int handle_hash_object_command(const char *file_name) {
 }
 
 
-int main(int argc, char *argv[]) {
-    printf("Welcome to my version control program\n");
-    if (argc > 1 && strcmp(argv[1], "init") == 0) {
-        printf("you typed %s\n", argv[1]);
-        if (handle_init_command() == 0) {
-            printf("initialized empty Jit repository in .jit\n");
-        } else {
-            fprintf(stderr, "error: failed to initialize empty Jit repository\n");
-        }
-    } else if (argc > 2 && strcmp(argv[1], "hash-object") == 0) {
-        printf("you typed %s\n", argv[2]);
-        if (handle_hash_object_command(argv[2]) == 0) {
-            printf("Success hash-object\n");
-        } else {
-            fprintf(stderr, "Failed hash-object\n");
-        }
+int handle_cat_file_command(const char *hash, char mode) {
+    // Open file
+    char file_path[128];
+    snprintf(file_path, sizeof(file_path), ".jit/objects/%.2s/%.38s", hash, hash + 2);
+    FILE *input_file = fopen(file_path, "r");
+    if (input_file == NULL) {
+        fprintf(stderr, "error: failed opening %s %s\n", file_path, strerror(errno));
+        return 1;
     }
+
+    // Determine file size
+    if (fseek(input_file, 0, SEEK_END) != 0) {
+        fprintf(stderr, "error: %s\n", strerror(errno));
+        fclose(input_file);
+        return 1;
+    }
+    long file_size = ftell(input_file);
+    if (file_size == -1L) {
+        fprintf(stderr, "error: %s\n", strerror(errno));
+        fclose(input_file);
+        return 1;
+    }
+
+    // Read and close file
+    rewind(input_file);
+    char *content_buffer = malloc(file_size);
+    fread(content_buffer, 1, file_size, input_file);
+    fclose(input_file);
+
+    // Get content only (no header)
+    size_t i = 0;
+    while (i < file_size && content_buffer[i] != '\0') {
+        i++;
+    }
+    i++;
+    size_t content_length = file_size - i;
+    fwrite(content_buffer + i, 1, content_length, stdout);
+
+    free(content_buffer);
     return 0;
 }

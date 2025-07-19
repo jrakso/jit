@@ -64,7 +64,7 @@ int handle_hash_object_command(const char *file_name) {
         return 1;
     }
 
-    // Read file
+    // Read and then close file
     rewind(pF);
     char *content_buffer = malloc(file_size);
     if (content_buffer == NULL) {
@@ -78,17 +78,18 @@ int handle_hash_object_command(const char *file_name) {
         fclose(pF);
         return 1;
     }
+    fclose(pF);
 
     // Create header
     char header_buffer[64];
     int header_len = snprintf(header_buffer, sizeof(header_buffer), "blob %ld", file_size);
+    header_buffer[header_len++] = '\0';
 
     size_t total_size = header_len + file_size;
     char *data_buffer = malloc(total_size);
     if(data_buffer == NULL) {
         fprintf(stderr, "error: memory allocation failed\n");
         free(content_buffer);
-        fclose(pF);
         return 1;
     }
 
@@ -99,13 +100,31 @@ int handle_hash_object_command(const char *file_name) {
     // Hash using SHA-1
     unsigned char hash[SHA_DIGEST_LENGTH];
     SHA1((unsigned char *)data_buffer, total_size, hash);
-
     for(int i = 0; i < SHA_DIGEST_LENGTH; i++) {
         printf("%02x", hash[i]);
     }
     printf("\n");
 
-    fclose(pF);
+    // Create folder and file
+    char dir_path[64];
+    snprintf(dir_path, sizeof(dir_path), ".jit/objects/%02x", hash[0]);
+    if (create_folder(dir_path, DIR_MODE) != 0) return 1;
+    char hash_hex[41];
+    for (int i = 0; i < SHA_DIGEST_LENGTH; i++) {
+        sprintf(hash_hex + (i * 2), "%02x", hash[i]);
+    }
+    char file_path[128];
+    snprintf(file_path, sizeof(file_path), ".jit/objects/%.2s/%.38s", hash_hex, hash_hex + 2);
+
+    // Write to file
+    FILE *output_file = fopen(file_path, "w");
+    if (output_file == NULL) {
+        fprintf(stderr, "error: failed creating new file %s\n", strerror(errno));
+        return 1;
+    }
+    fwrite(data_buffer, 1, total_size, output_file);
+    fclose(output_file);
+    free(data_buffer);
     return 0;
 }
 

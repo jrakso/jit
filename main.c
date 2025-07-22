@@ -8,11 +8,18 @@
 
 #define DIR_MODE 0755
 
+typedef struct {
+    char mode[7];
+    char *file_name;
+    unsigned char hash[20];
+} TreeEntry;
+
 int folder_exists(const char *path);
 int create_folder(const char *folder_name, mode_t mode);
 int handle_init_command();
 int handle_hash_object_command(const char *file_name);
 int handle_cat_file_command(const char *hash, char mode);
+int handle_write_tree_command();
 
 
 int main(int argc, char *argv[]) {
@@ -35,6 +42,8 @@ int main(int argc, char *argv[]) {
         if (strcmp(argv[2], "-p") == 0) {
             handle_cat_file_command(argv[3], 'p');
         }
+    } else if (argc > 1 && strcmp(argv[1], "write-tree") == 0) {
+
     }
     return 0;
 }
@@ -51,6 +60,47 @@ int create_folder(const char *folder_name, mode_t mode) {
         return 1;
     }
     return 0;
+}
+
+
+long get_file_size(FILE *pF) {
+    if (fseek(pF, 0, SEEK_END) != 0) {
+        fprintf(stderr, "error: %s\n", strerror(errno));
+        return -1;
+    }
+    long file_size = ftell(pF);
+    if (file_size == -1L) {
+        fprintf(stderr, "error: %s\n", strerror(errno));
+        return -1;
+    }
+    rewind(pF);
+    return file_size;
+}
+
+
+FILE *open_file(const char *file_name, const char *mode) {
+    FILE *pF = fopen(file_name, mode);
+    if (pF == NULL) {
+        fprintf(stderr, "error: failed opening %s %s\n", file_name, strerror(errno));
+        return NULL;
+    }
+    return pF;
+}
+
+
+char *read_file(FILE *pF, long file_size) {
+    char *content_buffer = malloc(file_size);
+    if (content_buffer == NULL) {
+        fprintf(stderr, "error: memory allocation failed\n");
+        return NULL;
+    }
+    size_t bytes_read = fread(content_buffer, 1, file_size, pF);
+    if (bytes_read != file_size) {
+        fprintf(stderr, "error: failed reading file\n");
+        free(content_buffer);
+        return NULL;
+    }
+    return content_buffer;
 }
 
 
@@ -75,45 +125,27 @@ int handle_init_command() {
 
 
 int handle_hash_object_command(const char *file_name) {
-    FILE *pF = fopen(file_name, "r");
-    if (pF == NULL) {
-        fprintf(stderr, "error: failed opening %s %s\n", file_name, strerror(errno));
-        return 1;
-    }
+    FILE *input_file = open_file(file_name, "r");
+    if (input_file == NULL) return 1;
 
-    // Determine file size
-    if (fseek(pF, 0, SEEK_END) != 0) {
-        fprintf(stderr, "error: %s\n", strerror(errno));
-        fclose(pF);
-        return 1;
-    }
-    long file_size = ftell(pF);
-    if (file_size == -1L) {
-        fprintf(stderr, "error: %s\n", strerror(errno));
-        fclose(pF);
+    // Get file size
+    long file_size = get_file_size(input_file);
+    if (file_size == -1) {
+        fclose(input_file);
         return 1;
     }
 
     // Read and then close file
-    rewind(pF);
-    char *content_buffer = malloc(file_size);
+    char *content_buffer = read_file(input_file, file_size);
+    fclose(input_file);
     if (content_buffer == NULL) {
-        fprintf(stderr, "error: memory allocation failed");
-        fclose(pF);
         return 1;
     }
-    size_t bytes_read = fread(content_buffer, 1, file_size, pF);
-    if (bytes_read != file_size) {
-        fprintf(stderr, "error: failed reading file");
-        fclose(pF);
-        return 1;
-    }
-    fclose(pF);
 
     // Create header
     char header_buffer[64];
     int header_len = snprintf(header_buffer, sizeof(header_buffer), "blob %ld", file_size);
-    header_buffer[header_len++] = '\0';
+    header_len++;
 
     size_t total_size = header_len + file_size;
     char *data_buffer = malloc(total_size);
@@ -130,15 +162,18 @@ int handle_hash_object_command(const char *file_name) {
     // Hash using SHA-1
     unsigned char hash[SHA_DIGEST_LENGTH];
     SHA1((unsigned char *)data_buffer, total_size, hash);
-    for(int i = 0; i < SHA_DIGEST_LENGTH; i++) {
-        printf("%02x", hash[i]);
-    }
-    printf("\n");
+    // for(int i = 0; i < SHA_DIGEST_LENGTH; i++) {
+    //     printf("%02x", hash[i]);
+    // }
+    // printf("\n");
 
     // Create folder and file
     char dir_path[64];
     snprintf(dir_path, sizeof(dir_path), ".jit/objects/%02x", hash[0]);
-    if (create_folder(dir_path, DIR_MODE) != 0) return 1;
+    if (create_folder(dir_path, DIR_MODE) != 0) {
+        free(data_buffer);
+        return 1;
+    }
     char hash_hex[41];
     for (int i = 0; i < SHA_DIGEST_LENGTH; i++) {
         sprintf(hash_hex + (i * 2), "%02x", hash[i]);
@@ -147,9 +182,9 @@ int handle_hash_object_command(const char *file_name) {
     snprintf(file_path, sizeof(file_path), ".jit/objects/%.2s/%.38s", hash_hex, hash_hex + 2);
 
     // Write to file
-    FILE *output_file = fopen(file_path, "wb");
+    FILE *output_file = open_file(file_path, "wb");
     if (output_file == NULL) {
-        fprintf(stderr, "error: failed creating new file %s\n", strerror(errno));
+        free(data_buffer);
         return 1;
     }
     fwrite(data_buffer, 1, total_size, output_file);
@@ -163,30 +198,20 @@ int handle_cat_file_command(const char *hash, char mode) {
     // Open file
     char file_path[128];
     snprintf(file_path, sizeof(file_path), ".jit/objects/%.2s/%.38s", hash, hash + 2);
-    FILE *input_file = fopen(file_path, "r");
-    if (input_file == NULL) {
-        fprintf(stderr, "error: failed opening %s %s\n", file_path, strerror(errno));
-        return 1;
-    }
+    FILE *input_file = open_file(file_path, "r");
+    if (input_file == NULL) return 1;
 
-    // Determine file size
-    if (fseek(input_file, 0, SEEK_END) != 0) {
-        fprintf(stderr, "error: %s\n", strerror(errno));
-        fclose(input_file);
-        return 1;
-    }
-    long file_size = ftell(input_file);
-    if (file_size == -1L) {
-        fprintf(stderr, "error: %s\n", strerror(errno));
+    // Get file size
+    long file_size = get_file_size(input_file);
+    if (file_size == -1) {
         fclose(input_file);
         return 1;
     }
 
     // Read and close file
-    rewind(input_file);
-    char *content_buffer = malloc(file_size);
-    fread(content_buffer, 1, file_size, input_file);
+    char *content_buffer = read_file(input_file, file_size);
     fclose(input_file);
+    if (content_buffer == NULL) return 1;
 
     // Get content only (no header)
     size_t i = 0;
@@ -199,4 +224,9 @@ int handle_cat_file_command(const char *hash, char mode) {
 
     free(content_buffer);
     return 0;
+}
+
+
+int handle_write_tree_command() {
+
 }
